@@ -95,6 +95,19 @@ func TestPreserveKnownSSHKeyIDsAfterRead(t *testing.T) {
 	assertSetStrings(t, data.SSHKeyIDs, []string{"configured-key"})
 }
 
+func TestPreserveKnownImage(t *testing.T) {
+	image := types.StringValue("79091d37-cf39-43cd-b193-ba9c2611c988")
+	data := InstanceResourceModel{
+		Image: types.StringValue("ubuntu-24.04"),
+	}
+
+	preserveKnownImage(image, &data)
+
+	if data.Image.ValueString() != image.ValueString() {
+		t.Fatalf("expected image %q, got %q", image.ValueString(), data.Image.ValueString())
+	}
+}
+
 func assertSetStrings(t *testing.T, set types.Set, want []string) {
 	t.Helper()
 

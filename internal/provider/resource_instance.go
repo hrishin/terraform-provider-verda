@@ -387,6 +387,7 @@ func (r *InstanceResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	plannedSSHKeyIDs := data.SSHKeyIDs
+	plannedImage := data.Image
 
 	createReq := verda.CreateInstanceRequest{
 		InstanceType: data.InstanceType.ValueString(),
@@ -481,6 +482,7 @@ func (r *InstanceResource) Create(ctx context.Context, req resource.CreateReques
 	// Now populate the rest of the instance data
 	r.flattenInstanceToModel(ctx, instance, &data, &resp.Diagnostics)
 	preserveKnownSSHKeyIDs(plannedSSHKeyIDs, &data)
+	preserveKnownImage(plannedImage, &data)
 
 	// Update state with full instance details (even if there were non-critical errors)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -496,6 +498,7 @@ func (r *InstanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 	}
 
 	priorSSHKeyIDs := data.SSHKeyIDs
+	priorImage := data.Image
 
 	instance, err := r.client.Instances.GetByID(ctx, data.ID.ValueString())
 	if err != nil {
@@ -505,6 +508,7 @@ func (r *InstanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	r.flattenInstanceToModel(ctx, instance, &data, &resp.Diagnostics)
 	preserveKnownSSHKeyIDs(priorSSHKeyIDs, &data)
+	preserveKnownImage(priorImage, &data)
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -670,6 +674,14 @@ func preserveKnownSSHKeyIDs(sshKeyIDs types.Set, data *InstanceResourceModel) {
 	}
 
 	data.SSHKeyIDs = sshKeyIDs
+}
+
+func preserveKnownImage(image types.String, data *InstanceResourceModel) {
+	if image.IsNull() || image.IsUnknown() {
+		return
+	}
+
+	data.Image = image
 }
 
 // setRequiresReplaceModifier is a plan modifier for types.Set that requires
