@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.5] - 2026-09-15
+
 ### Fixed
 
 - fix(instances): `verda_instance` create waits until the instance is `running` with an address, so `ip` is known to provisioners and dependents on the first apply; before, the resource returned as soon as the API accepted the order (`provisioning`, no address). New `timeouts { create = "20m" }`. A terminal status (`error`, `discontinued`, `notfound`, `deleting`) fails the apply with the instance kept in state. `Read` keeps a known `ip` when the API momentarily reports none for a running instance.
