@@ -34,7 +34,7 @@ resource "verda_instance" "spot_with_volumes" {
   ssh_key_ids = [verda_ssh_key.example.id]
 
   # OS volume: keep detached when spot is discontinued
-  os_volume {
+  os_volume = {
     name                = "os-vol"
     size                = 55
     type                = "NVMe"

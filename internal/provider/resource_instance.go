@@ -23,10 +23,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -103,6 +106,30 @@ type OSVolumeCreateModel struct {
 	Size              types.Int64  `tfsdk:"size"`
 	Type              types.String `tfsdk:"type"`
 	OnSpotDiscontinue types.String `tfsdk:"on_spot_discontinue"`
+	OnDestroy         types.String `tfsdk:"on_destroy"`
+}
+
+// What happens to the OS volume when the instance is destroyed. The API's
+// own default is to delete it (verda-cloud/terraform-provider-verda#17).
+const (
+	osVolumeDeletePermanently = "delete_permanently"
+	osVolumeMoveToTrash       = "move_to_trash"
+	osVolumeKeepDetached      = "keep_detached"
+)
+
+// deleteVolumePolicy maps os_volume.on_destroy to the delete action's
+// volume_ids and delete_permanently: nil volume_ids keeps the API default
+// (OS volume deleted, data volumes detached), an empty slice deletes no
+// volume at all.
+func deleteVolumePolicy(onDestroy string) (volumeIDs []string, deletePermanently bool) {
+	switch onDestroy {
+	case osVolumeKeepDetached:
+		return []string{}, false
+	case osVolumeMoveToTrash:
+		return nil, false
+	default:
+		return nil, true
+	}
 }
 
 func (r *InstanceResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -338,20 +365,38 @@ func (r *InstanceResource) Schema(ctx context.Context, req resource.SchemaReques
 				Attributes: map[string]schema.Attribute{
 					"name": schema.StringAttribute{
 						Required: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"size": schema.Int64Attribute{
 						Required: true,
+						PlanModifiers: []planmodifier.Int64{
+							int64planmodifier.RequiresReplace(),
+						},
 					},
 					"type": schema.StringAttribute{
 						Required: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"on_spot_discontinue": schema.StringAttribute{
 						MarkdownDescription: "Action to take on spot instance discontinuation: 'keep_detached', 'move_to_trash', or 'delete_permanently'",
 						Optional:            true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
-				},
-				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
+					"on_destroy": schema.StringAttribute{
+						MarkdownDescription: "What happens to the OS volume when the instance is destroyed: 'delete_permanently' (default), 'move_to_trash', or 'keep_detached'",
+						Optional:            true,
+						Computed:            true,
+						Default:             stringdefault.StaticString(osVolumeDeletePermanently),
+						Validators: []validator.String{
+							osVolumeOnDestroyValidator{},
+						},
+					},
 				},
 			},
 		},
@@ -542,7 +587,20 @@ func (r *InstanceResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	err := r.client.Instances.Delete(ctx, []string{data.ID.ValueString()}, []string{}, false)
+	onDestroy := osVolumeDeletePermanently
+	if !data.OSVolume.IsNull() && !data.OSVolume.IsUnknown() {
+		var osVolume OSVolumeCreateModel
+		resp.Diagnostics.Append(data.OSVolume.As(ctx, &osVolume, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if !osVolume.OnDestroy.IsNull() && osVolume.OnDestroy.ValueString() != "" {
+			onDestroy = osVolume.OnDestroy.ValueString()
+		}
+	}
+	volumeIDs, deletePermanently := deleteVolumePolicy(onDestroy)
+
+	err := r.client.Instances.Delete(ctx, []string{data.ID.ValueString()}, volumeIDs, deletePermanently)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete instance, got error: %s", err))
 		return
