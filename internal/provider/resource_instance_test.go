@@ -16,8 +16,11 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -160,5 +163,101 @@ func TestDeleteVolumePolicy(t *testing.T) {
 		if (ids == nil) != (c.wantIDs == nil) || len(ids) != len(c.wantIDs) {
 			t.Errorf("%s: volume_ids = %#v, want %#v", c.description, ids, c.wantIDs)
 		}
+	}
+}
+
+// fakeInstances answers GetByID from a scripted sequence of states.
+type fakeInstances struct {
+	steps []fakeStep
+	calls int
+}
+
+type fakeStep struct {
+	status string
+	ip     string
+	err    error
+}
+
+func (f *fakeInstances) GetByID(ctx context.Context, id string) (*verda.Instance, error) {
+	step := f.steps[len(f.steps)-1]
+	if f.calls < len(f.steps) {
+		step = f.steps[f.calls]
+	}
+	f.calls++
+	if step.err != nil {
+		return nil, step.err
+	}
+	inst := &verda.Instance{ID: id, Status: step.status}
+	if step.ip != "" {
+		ip := step.ip
+		inst.IP = &ip
+	}
+	return inst, nil
+}
+
+func TestWaitForRunning(t *testing.T) {
+	instancePollInterval = time.Millisecond
+	t.Cleanup(func() { instancePollInterval = 10 * time.Second })
+	ctx := context.Background()
+
+	t.Run("provisioning then running with an address", func(t *testing.T) {
+		f := &fakeInstances{steps: []fakeStep{
+			{status: verda.StatusProvisioning},
+			{status: verda.StatusRunning}, // running, no address yet
+			{status: verda.StatusRunning, ip: "203.0.113.7"},
+		}}
+		inst, err := waitForRunning(ctx, f, "i-1", time.Second)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if inst.IP == nil || *inst.IP != "203.0.113.7" {
+			t.Fatalf("ip = %v, want 203.0.113.7", inst.IP)
+		}
+		if f.calls != 3 {
+			t.Fatalf("calls = %d, want 3", f.calls)
+		}
+	})
+
+	t.Run("a read error is retried", func(t *testing.T) {
+		f := &fakeInstances{steps: []fakeStep{
+			{err: errors.New("502")},
+			{status: verda.StatusRunning, ip: "203.0.113.8"},
+		}}
+		if _, err := waitForRunning(ctx, f, "i-2", time.Second); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("a terminal status fails at once", func(t *testing.T) {
+		f := &fakeInstances{steps: []fakeStep{{status: verda.StatusError}}}
+		_, err := waitForRunning(ctx, f, "i-3", time.Second)
+		if err == nil || f.calls != 1 {
+			t.Fatalf("err = %v, calls = %d; want an error after one call", err, f.calls)
+		}
+	})
+
+	t.Run("the timeout names the last status", func(t *testing.T) {
+		f := &fakeInstances{steps: []fakeStep{{status: verda.StatusProvisioning}}}
+		_, err := waitForRunning(ctx, f, "i-4", 5*time.Millisecond)
+		if err == nil || !strings.Contains(err.Error(), verda.StatusProvisioning) {
+			t.Fatalf("err = %v; want a timeout naming %q", err, verda.StatusProvisioning)
+		}
+	})
+}
+
+func TestPreserveKnownIP(t *testing.T) {
+	prior := types.StringValue("203.0.113.9")
+	running := &verda.Instance{Status: verda.StatusRunning}
+	data := InstanceResourceModel{IP: types.StringNull()}
+	preserveKnownIP(prior, running, &data)
+	if data.IP.ValueString() != "203.0.113.9" {
+		t.Fatalf("running instance with no ip from the API: ip = %q, want the prior one", data.IP.ValueString())
+	}
+
+	stopped := &verda.Instance{Status: verda.StatusOffline}
+	data = InstanceResourceModel{IP: types.StringNull()}
+	preserveKnownIP(prior, stopped, &data)
+	if !data.IP.IsNull() {
+		t.Fatalf("offline instance: ip = %q, want null", data.IP.ValueString())
 	}
 }
