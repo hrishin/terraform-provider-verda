@@ -139,3 +139,26 @@ func sameStringElements(a, b []string) bool {
 
 	return true
 }
+
+func TestDeleteVolumePolicy(t *testing.T) {
+	cases := []struct {
+		onDestroy   string
+		wantIDs     []string
+		wantPerm    bool
+		description string
+	}{
+		{"", nil, true, "unset: the API default deletes the OS volume, permanently"},
+		{osVolumeDeletePermanently, nil, true, "delete_permanently: API default, no trash"},
+		{osVolumeMoveToTrash, nil, false, "move_to_trash: API default, trash first"},
+		{osVolumeKeepDetached, []string{}, false, "keep_detached: an empty list deletes no volume"},
+	}
+	for _, c := range cases {
+		ids, perm := deleteVolumePolicy(c.onDestroy)
+		if perm != c.wantPerm {
+			t.Errorf("%s: delete_permanently = %v, want %v", c.description, perm, c.wantPerm)
+		}
+		if (ids == nil) != (c.wantIDs == nil) || len(ids) != len(c.wantIDs) {
+			t.Errorf("%s: volume_ids = %#v, want %#v", c.description, ids, c.wantIDs)
+		}
+	}
+}
