@@ -55,8 +55,26 @@ jobs:
         with:
           go-version-file: "go.mod"
 
+      - name: Resolve GoReleaser flags
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          ARGS="release --clean --skip=validate"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="${ARGS} --snapshot --skip=sign,publish"
+            echo "SIGN=false" >> "$GITHUB_ENV"
+          elif [ -z "${GPG_PRIVATE_KEY}" ]; then
+            echo "::warning::GPG_PRIVATE_KEY secret not set; publishing unsigned artifacts (not accepted by the Terraform Registry)"
+            ARGS="${ARGS} --skip=sign"
+            echo "SIGN=false" >> "$GITHUB_ENV"
+          else
+            echo "SIGN=true" >> "$GITHUB_ENV"
+          fi
+          echo "GORELEASER_ARGS=${ARGS}" >> "$GITHUB_ENV"
+          echo "goreleaser ${ARGS}"
+
       - name: Import GPG key
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ env.SIGN == 'true' }}
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -82,7 +100,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --clean --skip=validate ${{ inputs.dry_run == true && '--snapshot --skip=sign,publish' || '' }}
+          args: ${{ env.GORELEASER_ARGS }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ env.RELEASE_TAG }}

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.4] - 2026-09-15
+
+### Added
+
+- ci(release): the Release workflow can be run manually (`workflow_dispatch`) with a version tag and an optional dry-run; signing is skipped when GPG secrets are not configured.
+
 ### Fixed
 
 - fix(instances): `terraform destroy` deletes the instance's OS volume again. `Delete` sent `volume_ids: []`, which since verdacloud-sdk-go v1.4.0 means "delete no volume" and left every OS volume detached and billed (#17). New `os_volume.on_destroy`: `delete_permanently` (default), `move_to_trash`, `keep_detached`; changing it no longer replaces the instance.
