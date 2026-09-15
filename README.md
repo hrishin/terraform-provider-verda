@@ -12,7 +12,43 @@ Terraform/OpenTofu provider for managing Verda Cloud infrastructure.
 
 This software is currently in beta and will contain bugs. Please try it out and report your issues in the repository.
 
-As the provider is not yet in the Terraform registry, the local version needs to be referred in your .terraformrc file:
+As the provider is not yet in the Terraform registry, Terraform has to be pointed at the
+binaries published on the [Releases](https://github.com/hrishin/terraform-provider-verda/releases) page.
+The easiest way is a filesystem mirror, which keeps `terraform init`, version constraints and the
+lock file working as usual:
+
+```bash
+./scripts/install-provider.sh --version v1.1.4   # omit --version for the latest release
+export TF_CLI_CONFIG_FILE=~/.terraform.d/verda-mirror/terraformrc
+```
+
+```terraform
+terraform {
+  required_providers {
+    verda = {
+      source  = "verda-cloud/verda"
+      version = "1.1.4"
+    }
+  }
+}
+```
+
+The script downloads the zip for your platform, verifies it against the release `SHA256SUMS` and
+writes the CLI config. Pass `--rc` to install it as `~/.terraformrc` instead of using
+`TF_CLI_CONFIG_FILE`, or `--all` to mirror every platform.
+
+In GitHub Actions use the bundled composite action, which runs the same script and exports
+`TF_CLI_CONFIG_FILE` for the following steps:
+
+```yaml
+- uses: hashicorp/setup-terraform@v3
+- uses: hrishin/terraform-provider-verda/.github/actions/setup-verda-provider@main
+  with:
+    version: v1.1.4 # optional, defaults to the latest release
+- run: terraform init
+```
+
+Alternatively, for a locally built binary, use a development override in your `.terraformrc`:
 
 ```terraform
 provider_installation {
@@ -24,7 +60,7 @@ provider_installation {
 }
 ```
 
-The binary can be downloaded to your machine from the Releases page. Usage instructions and examples can be found from the [examples](examples) directory.
+Usage instructions and examples can be found from the [examples](examples) directory.
 
 ## Using the Provider
 

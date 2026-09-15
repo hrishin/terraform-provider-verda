@@ -1,0 +1,32 @@
+name: Setup Verda Terraform Provider
+description: >-
+  Installs a released verda provider binary from GitHub Releases into a
+  Terraform filesystem mirror and exports TF_CLI_CONFIG_FILE so that
+  `source = "verda-cloud/verda"` resolves to it.
+
+inputs:
+  version:
+    description: Release to install (e.g. v1.1.4). Defaults to the latest release.
+    required: false
+    default: ""
+  repo:
+    description: GitHub repository hosting the releases.
+    required: false
+    default: hrishin/terraform-provider-verda
+  mirror:
+    description: Directory for the filesystem mirror.
+    required: false
+    default: ${{ runner.temp }}/verda-provider-mirror
+
+runs:
+  using: composite
+  steps:
+    - name: Install provider into filesystem mirror
+      shell: bash
+      env:
+        VERDA_PROVIDER_REPO: ${{ inputs.repo }}
+        VERDA_PROVIDER_MIRROR: ${{ inputs.mirror }}
+      run: |
+        args=()
+        [ -n "${{ inputs.version }}" ] && args+=(--version "${{ inputs.version }}")
+        "${{ github.action_path }}/../../../scripts/install-provider.sh" "${args[@]}"

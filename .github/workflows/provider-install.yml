@@ -1,0 +1,52 @@
+name: Provider Install
+
+# Verifies that a published release can be consumed from GitHub Actions:
+# install the binary into a Terraform filesystem mirror and run `terraform init`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release to verify (e.g. v1.1.4); empty = latest"
+        required: false
+        default: ""
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    name: terraform init (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install verda provider
+        uses: ./.github/actions/setup-verda-provider
+        with:
+          version: ${{ inputs.version || github.event.release.tag_name }}
+          repo: ${{ github.repository }}
+
+      - name: terraform init against the mirror
+        run: |
+          mkdir -p "${RUNNER_TEMP}/tf" && cd "${RUNNER_TEMP}/tf"
+          cat > main.tf <<'TF'
+          terraform {
+            required_providers {
+              verda = { source = "verda-cloud/verda" }
+            }
+          }
+          TF
+          terraform init -no-color
+          terraform providers -no-color
+          grep -A2 'verda-cloud/verda' .terraform.lock.hcl
