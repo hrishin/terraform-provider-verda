@@ -4,6 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  # Manual publish: Actions -> Release -> "Run workflow".
+  # Creates the tag on the chosen ref if it does not exist yet, then publishes.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to publish (e.g. v1.1.4)"
+        required: true
+        type: string
+      dry_run:
+        description: "Build only (snapshot); upload artifacts instead of publishing a release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -16,11 +29,34 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve release tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${INPUT_TAG}"
+            case "${TAG}" in v*) ;; *) echo "tag must start with 'v' (got '${TAG}')"; exit 1 ;; esac
+            if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag -a "${TAG}" -m "Release ${TAG}"
+              if [ "${{ inputs.dry_run }}" != "true" ]; then
+                git push origin "refs/tags/${TAG}"
+              fi
+            fi
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          echo "Releasing ${TAG}"
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
 
       - name: Import GPG key
+        if: ${{ inputs.dry_run != true }}
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -41,14 +77,24 @@ jobs:
 
       - name: Copy manifest for release
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          cp terraform-registry-manifest.json terraform-provider-verda_${VERSION}_manifest.json
+          cp terraform-registry-manifest.json terraform-provider-verda_${RELEASE_VERSION}_manifest.json
 
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --clean --skip=validate
+          args: release --clean --skip=validate ${{ inputs.dry_run == true && '--snapshot --skip=sign,publish' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ env.RELEASE_TAG }}
           GPG_FINGERPRINT: ${{ env.GPG_FINGERPRINT }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Upload dry-run artifacts
+        if: ${{ inputs.dry_run == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-provider-verda-${{ env.RELEASE_TAG }}-snapshot
+          path: |
+            dist/*.zip
+            dist/*_SHA256SUMS
+            dist/*_manifest.json
